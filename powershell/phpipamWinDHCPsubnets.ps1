@@ -1,5 +1,5 @@
 # -----------------------------
-# Legal Disclaimer:
+# Legal Disclaimer: 
 # -----------------------------
 # This script is provided "as is" and without any express or implied warranties, including, without limitation, the implied warranties of merchantability and fitness for a particular purpose. 
 # The author of this script assumes no liability for any damage or data loss caused by the use of this script, directly or indirectly. 
