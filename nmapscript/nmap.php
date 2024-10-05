@@ -1,6 +1,6 @@
 <?php
 // Use at Your Own Risk
-//
+// 
 // This software is provided "as is" and without any express or implied warranties. 
 // By downloading, installing, or using this software, you acknowledge that you do so entirely at your own risk. 
 // The developers and contributors of this software do not assume any responsibility or liability for any damages 
