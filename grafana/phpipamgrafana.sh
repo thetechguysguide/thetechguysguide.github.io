@@ -108,8 +108,8 @@ log_and_run "firewall-cmd --reload"
 log_and_run "dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
 log_and_run "dnf -y install https://rpms.remirepo.net/enterprise/remi-release-9.rpm"
 
-# Enable PHP 8.3 and install additional PHP packages and tools
-log_and_run "dnf -y module enable php:remi-8.3"
+# Enable PHP 8.1 and install additional PHP packages and tools  ## Note issue discover with 8.2 and 8.3 lowered back to 8.1 11-24-24
+log_and_run "dnf -y module enable php:remi-8.1"
 log_and_run "dnf -y install php php-cli php-fpm php-common php-gd php-ldap php-pdo php-mysqlnd php-pear php-snmp php-xml php-mbstring php-gmp php-mcrypt wget tar perl perl-DBD-MySQL net-snmp fping git nginx"
 log_and_run "dnf --enablerepo=devel -y install perl-IO-Tty"
 
@@ -278,15 +278,29 @@ sleep 2
 echo "**** Script is done!"
 echo ""
 echo ""
-echo ""
 echo "Thanks for using this script the Techguysguide."
-echo ""
-echo ""
-echo ""
-echo ""
 # Display server information and URLs
 SERVER_IP=$(hostname -I | awk '{print $1}')
 echo "Server Information and URLs!"
 echo "phpIPAM: http://$SERVER_IP/"
 echo "Webmin: https://$SERVER_IP:10000"
 echo "Grafana: http://$SERVER_IP:3000"
+
+# Display server IP address and phpIPAM URL
+SERVER_IP=$(hostname -I | awk '{print $1}')
+echo "Server Information"
+echo ""
+echo "Server IP Address: $SERVER_IP" | tee -a $LOGFILE 
+echo "phpIPAM URL: http://$SERVER_IP/" | tee -a $LOGFILE
+echo "Webmin URL: https://$SERVER_IP:10000" | tee -a
+sleep 5
+
+# Thank you message and links
+echo "*********************************************************************************************************"
+echo "*********************************************************************************************************"
+echo "*********************************************************************************************************"
+echo ""
+echo "Thank you for using this script!" | tee -a $LOGFILE
+echo "Check out my YouTube channel: https://www.youtube.com/@thetechguysguide" | tee -a $LOGFILE
+echo "Follow me on Twitter: https://twitter.com/thetechguyguide" | tee -a $LOGFILE
+echo "Visit my GitHub for Scripts and Config Files: https://github.com/thetechguysguide/thetechguysguide.github.io" | tee -a $LOGFILE
