@@ -195,6 +195,7 @@ sudo chmod -R 755 /var/www/html
 
 echo "**** Copy and modify config.php."
 cp config.dist.php config.php
+sed -i "s/\$disable_installer = false;/\$disable_installer = true;/" config.php
 sed -i "s/\$db\['host'\] = '127.0.0.1';/\$db\['host'\] = 'localhost';/" config.php
 
 echo "**** Configure PHP-FPM to use Nginx."
