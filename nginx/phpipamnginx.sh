@@ -81,6 +81,17 @@
 read -sp "Please enter the MySQL root password: " MYSQL_ROOT_PASSWORD
 echo
 
+# Prompt for database setup
+echo "This will help with CSRF issue default userid and pass are admin/ipamadmin"
+read -p "Would you like to set up the default phpIPAM database? (y/n): " SETUP_DB_INPUT
+
+# Convert user input to lowercase and set the flag
+if [[ "$SETUP_DB_INPUT" =~ ^[Yy]$ ]]; then
+    SETUP_DB=true
+else
+    SETUP_DB=false
+fi
+
 # Prompt for Webmin installation
 echo "The Userid for Webmin is root and password is roots password from the system"
 read -p "Would you like to install Webmin? (y/n): " INSTALL_WEBMIN_INPUT
@@ -149,6 +160,34 @@ sudo git submodule update --init --recursive
 echo "**** Git clone completed."
 # Sleep
 sleep 3
+
+# Setup Default Database
+if [ "$SETUP_DB" = true ]; then
+    echo "**** Setting up phpIPAM database."
+
+    # Log into MySQL to create the database and user
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
+CREATE DATABASE phpipam;
+CREATE USER 'phpipam'@'%' IDENTIFIED BY 'phpipamadmin';
+GRANT ALL PRIVILEGES ON phpipam.* TO 'phpipam'@'%';
+FLUSH PRIVILEGES;
+EOF
+
+    # Import the SCHEMA.sql file into the newly created database
+    if [ -f "/var/www/html/db/SCHEMA.sql" ]; then
+        echo "**** Importing SCHEMA.sql into the phpIPAM database."
+        mysql -u root -p"${MYSQL_ROOT_PASSWORD}" phpipam < /var/www/html/db/SCHEMA.sql
+        if [ $? -eq 0 ]; then
+            echo "**** Database import successful."
+        else
+            echo "**** Error during database import. Check logs for details."
+        fi
+    else
+        echo "**** SCHEMA.sql file not found. Database import skipped."
+    fi
+else
+    echo "**** Database setup skipped as per user input."
+fi
 
 echo "**** Change ownership to Nginx and adjust permissions."
 sudo chown -R nginx:nginx /var/www/html
