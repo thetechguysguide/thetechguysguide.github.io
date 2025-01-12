@@ -146,9 +146,6 @@ wait $clone_pid
 cd /var/www/html
 sudo git submodule update --init --recursive
 
-# Checkout version 1.6
-git checkout -b 1.6 origin/1.6
-
 echo "**** Git clone completed."
 # Sleep
 sleep 3
