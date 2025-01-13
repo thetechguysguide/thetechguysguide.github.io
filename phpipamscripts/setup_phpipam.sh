@@ -172,9 +172,6 @@ log_and_run "git clone --recursive https://github.com/phpipam/phpipam.git /var/w
 # Change to phpIPAM directory
 cd /var/www/html/
 
-# Checkout the 1.6 branch
-log_and_run "git checkout -b 1.6 origin/1.6"
-
 # Copy configuration file
 log_and_run "cp config.dist.php config.php"
 
