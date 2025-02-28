@@ -49,34 +49,61 @@ log_and_run() {
     eval $1 2>&1 | tee -a $LOGFILE
 }
 
-echo "🔹 Installing phpIPAM Dependencies..."
 
+# Install Apache and tools
+log_and_run "dnf install -y httpd httpd-tools"
+log_and_run "systemctl enable httpd"
+log_and_run "systemctl start httpd"
 
-# Install necessary packages
-log_and_run "sudo dnf install -y epel-release"
-log_and_run "sudo dnf install -y httpd mariadb-server mariadb php php-cli php-gd php-fpm php-common php-ldap php-pdo php-mysqlnd php-pear php-snmp php-xml php-mbstring php-mcrypt php-gmp git wget tar perl unzip"
+# Wait for Apache to start
+sleep 5
 
-# Start and enable required services
-sudo systemctl enable --now mariadb httpd
+# Configure firewall for HTTP and HTTPS
+log_and_run "firewall-cmd --permanent --zone=public --add-service=http"
+log_and_run "firewall-cmd --permanent --zone=public --add-service=https"
+log_and_run "firewall-cmd --reload"
+
+# Install EPEL and Remi repositories
+log_and_run "dnf -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm"
+log_and_run "dnf -y install https://rpms.remirepo.net/enterprise/remi-release-9.rpm"
+
+# Enable PHP 8.3 module and install PHP
+log_and_run "dnf -y install php"
+
+# Install additional PHP packages and other software
+log_and_run "dnf -y install php php-cli php-gd php-fpm php-common php-ldap php-pdo php-mysqlnd php-pear php-snmp php-xml php-mbstring php-mcrypt php-gmp git nginx wget tar perl net-snmp"
+
+# Enable and start PHP-FPM
+log_and_run "systemctl enable php-fpm"
+log_and_run "systemctl start php-fpm"
+
+# Wait for PHP-FPM to start
+sleep 5
+
+# Restart Apache to apply changes
+log_and_run "systemctl restart httpd"
+
+# Install and configure MariaDB
+log_and_run "dnf install -y mariadb-server mariadb"
+log_and_run "systemctl enable mariadb"
+log_and_run "systemctl start mariadb"
 
 # Secure MariaDB
 echo "🔹 Configuring MariaDB..."
-sudo mysql_secure_installation <<EOF
+mysql_secure_installation
 
-y
-StrongRootPass123
-StrongRootPass123
-y
-y
-y
-y
-EOF
 
-# Download and Install phpIPAM
-echo "🔹 Installing phpIPAM..."
-log_and_run "cd /var/www/html"
-log_and_run "sudo git clone --depth=1 https://github.com/phpipam/phpipam.git ."
-log_and_run "sudo cp config.dist.php config.php"
+# Install additional PHP packages and other software
+log_and_run "sudo dnf -y install git php-gmp php-pdo_mysql php-gd php-pear-Mail php-snmp fping"
+
+# Clone phpIPAM repository
+log_and_run "git clone --recursive https://github.com/phpipam/phpipam.git /var/www/html/"
+
+# Change to phpIPAM directory
+cd /var/www/html/
+
+# Copy configuration file
+log_and_run "cp config.dist.php config.php"
 
 # Update database settings in phpIPAM config
 echo "🔹 Configuring phpIPAM database settings..."
