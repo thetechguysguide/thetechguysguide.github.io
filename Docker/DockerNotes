@@ -1,0 +1,232 @@
+We need to set up Rocky Linux 9 with Docker and Docker Compose.
+
+### Step 1: Set Up Docker and Docker Compose and enable it to start on reboot
+1. **Log in to Your Rocky Linux 9 Computer**
+   - Open a terminal window. You’ll need to be the "root" user or use `sudo` for some commands. For simplicity, we’ll assume you’re root. If not, add `sudo` before each command.
+
+2. **Update the System**
+   - Type this command to make sure your system is up to date:
+
+     dnf update -y
+
+3. **Install Docker**
+   - Lets add the Docker repository:
+
+     dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
+
+   - Install Docker:
+
+     dnf install docker-ce docker-ce-cli containerd.io -y
+
+   - Start Docker and make it run every time the computer starts:
+
+     systemctl start docker
+     systemctl enable docker
+
+   - Check Docker is working:
+
+     docker --version
+
+     You should see something like `Docker version 24.x.x`.
+
+4. **Install Docker Compose**
+   - Install `curl` (needed to download Docker Compose):  Its should be there but just in case
+
+     dnf install curl -y
+
+   - Download Docker Compose:
+
+     curl -L https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m) -o /usr/local/bin/docker-compose
+
+   - Make it executable:
+
+     chmod +x /usr/local/bin/docker-compose
+
+   - Check it works:
+
+     docker-compose --version
+
+     You’ll see a version number like `Docker Compose version v2.x.x`.
+
+---
+
+### Step 2: Set Up the phpIPAM
+We’ll create a folder for phpIPAM and set up Docker to run it.
+
+1. **Create a Folder for phpipam**
+   - Make a directory called `phpipam-docker` in your home directory (or wherever you want):
+
+     mkdir /root/phpipam-docker
+     cd /root/phpipam-docker
+
+2. **Create the Docker Compose File**
+   - Use a text editor like `nano` to create a file called `docker-compose.yml`:
+
+     nano docker-compose.yml
+
+   - Copy and paste this text into the file:
+   - Note yml files have to be correctly structured if there are too many spaces it will fail.
+
+****Copy Below***
+services:
+  phpipam-web:
+    build:
+      context: ./phpipam-custom  # Points to the subdirectory with Dockerfile
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    environment:
+      - TZ=America/Los_Angeles  # Change to your timezone, e.g., America/New_York
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PASS=your_secure_password  # Change this to a strong password
+      - IPAM_DATABASE_NAME=phpipam
+      - IPAM_DATABASE_USER=phpipam
+    restart: unless-stopped
+    depends_on:
+      - phpipam-db
+  phpipam-db:
+    image: mariadb:latest
+    environment:
+      - MYSQL_ROOT_PASSWORD=your_root_password  # Change this to a strong password
+      - MYSQL_DATABASE=phpipam
+      - MYSQL_USER=phpipam
+      - MYSQL_PASSWORD=your_secure_password  # Match the password above
+    restart: unless-stopped
+    volumes:
+      - phpipam-db-data:/var/lib/mysql
+  phpipam-cron:
+    image: phpipam/phpipam-cron:latest
+    environment:
+      - TZ=America/Los_Angeles  # Match the timezone above
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PASS=your_secure_password  # Match the password above
+      - SCAN_INTERVAL=1h
+    restart: unless-stopped
+    depends_on:
+      - phpipam-db
+volumes:
+  phpipam-db-data:
+****Copy Above***
+
+   - Save the file:
+     - Press `Ctrl+O`, then `Enter`, then `Ctrl+X` to exit `nano`.
+   - Notes:
+     - Change `your_secure_password` and `your_root_password` to strong passwords you’ll remember.
+     - Adjust `TZ` to your timezone (e.g., `Europe/London`, `Asia/Tokyo`).
+
+3. **Create a Subdirectory for the Custom Dockerfile**
+   - Make a folder called `phpipam-custom` inside `phpipam-docker`:
+
+mkdir phpipam-custom
+cd phpipam-custom
+
+4. **Create the Dockerfile**
+   - Create a file called `Dockerfile` in the `phpipam-custom` folder:
+
+nano Dockerfile
+
+   - Copy and paste this text:
+
+****Copy Below***
+FROM phpipam/phpipam-www:latest
+
+# Update package list (optional but good practice)
+RUN apk update
+
+# Enable mod_rewrite for pretty URLs
+RUN if [ -f /usr/lib/apache2/mod_rewrite.so ]; then \
+     echo "LoadModule rewrite_module /usr/lib/apache2/mod_rewrite.so" >> /etc/apache2/httpd.conf; \
+     else \
+     echo "mod_rewrite not found"; exit 1; \
+     fi
+
+# Allow .htaccess overrides for pretty URLs
+RUN sed -i 's/AllowOverride None/AllowOverride All/' /etc/apache2/httpd.conf
+****Copy Above***
+
+   - Save the file:
+     - Press `Ctrl+O`, then `Enter`, then `Ctrl+X` to exit `nano`.
+   - This file customizes phpIPAM to support pretty URLs (like `/dashboard` instead of `/index.php?page=dashboard`).
+
+5. **Check Your Directory Structure**
+   - Go back to the main folder:
+
+     cd /root/phpipam-docker
+
+   - Run:
+     ls -R
+
+   - You should see:
+     /root/phpipam-docker:
+     docker-compose.yml  phpipam-custom
+
+     /root/phpipam-docker/phpipam-custom:
+     Dockerfile
+
+### Step 3: Start phpIPAM 
+Now we’ll build and run phpIPAM.
+
+1. **Build and Start the Containers**
+   - From the `/root/phpipam-docker` folder, run:
+
+     docker-compose up -d --build
+
+   - This builds the custom phpIPAM image and starts all three containers (`phpipam-web`, `phpipam-db`, `phpipam-cron`).
+
+2. **Check Everything is Running**
+   - Type:
+     docker ps
+   - You should see three containers running with names like `phpipam-docker-phpipam-web-1`.
+
+### Step 4: Set Up phpIPAM in Your Browser
+1. **Open phpIPAM**
+   - Open a web browser and go to `http://<your_server_ip>` (e.g., `http://192.168.1.100` if it’s on your local network).
+
+2. **Run the Database Setup**
+   - You’ll see a setup page. Choose **"Automatic database installation"**.
+   - Fill in these details:
+     - Remove the create database
+     - **MySQL server hostname**: `phpipam-db`
+     - **Database name**: `phpipam`
+     - **Username**: `phpipam`
+     - **Password**: `your_secure_password` (the one you set in `docker-compose.yml`)
+   - Click **"Install database"** and follow the steps to set an admin password.
+
+   - Note if phpipam user account fails use root works every time.
+
+3. **Log In**
+   - Log in with:
+     - Username: `admin`
+     - Password: The one you just set.
+
+### Step 5: Enable Pretty URLs
+The Dockerfile already set up Apache for pretty URLs, but we need to tell phpIPAM to use them.
+
+1. **Go to Settings**
+   - In phpIPAM, click **Administration > Settings**.
+
+2. **Turn On Pretty URLs**
+   - Look for **"Prettify links"** or **"Rewrite URLs"**.
+   - Set it to **"Yes"** or check the box.
+   - Click **Save**.
+
+3. **Test It**
+   - Go to `http://<your_server_ip>/dashboard` in your browser.
+   - If it loads the dashboard, pretty URLs are working! If not, ask your teacher for help.
+
+Step 6
+
+	After successfull install we want to remove from the home screen 
+		Please disable installation scripts:
+		config.php: $disable_installer = true;
+		docker: env IPAM_DISABLE_INSTALLER=1
+		
+	lets reopen the docker-compose.yml under phpipam-web and under environment we want to add the following line
+		
+	  - IPAM_DISABLE_INSTALLER=1
+
+--- restart the phpipam 
+
+docker-compose stop
+docker-compose up -d
+
