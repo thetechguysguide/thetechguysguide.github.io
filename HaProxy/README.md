@@ -1,3 +1,38 @@
+Why Enable the Admin Socket
+You enable the admin socket if you want to monitor or control HAProxy while it's running — like checking live stats, temporarily disabling a backend server, or integrating with monitoring tools.
+
+Why Disable the Admin Socket
+You disable it if you don’t need real-time control or want to keep things simple and secure — especially if you’re not using tools that connect to the socket or you’re just using the web stats page.
+
+Enabling requires more configuration, just as a fyi
+
+Steps to Disable the Admin Socket
+
+1. *** Edit HAProxy Config
+
+	Open the configuration file:
+
+	sudo nano /etc/haproxy/haproxy.cfg
+
+2. *** Comment Out or Remove This Line in the global Section
+
+	# stats socket /run/haproxy/admin.sock mode 660 level admin
+
+3. *** Save and Exit
+
+	Restart HAProxy:
+
+	sudo systemctl restart haproxy
+
+	Verify It's Gone
+	Check that HAProxy no longer tries to bind the socket:
+
+	sudo journalctl -u haproxy | grep socket
+
+	You should not see:
+
+	cannot bind UNIX socket /run/haproxy/admin.sock
+
 Enabling the Admin Socket
 
 1. *** Restore the Config Line
