@@ -1,0 +1,222 @@
+# Advanced phpIPAM in Docker – HA Deployment Project
+
+## 1. Objective
+Build a highly‑available phpIPAM deployment on two Rocky Linux 9.5 hosts using Docker containers, a MariaDB Galera cluster, and an active/standby VIP managed by HAProxy + Keepalived. 
+The stack must support reverse‑proxy headers and outbound proxy access (IPAM_TRUST_X_FORWARDED, PROXY_ENABLED, etc.).
+
+## 2. High‑Level Architecture
+```
+         VIP 10.25.70.100:80/443  (keepalived)
+                  |
+            [HAProxy container]
+         -------------------------
+         |                       |
+Node‑A (10.25.70.101)      Node‑B (10.25.70.102)
+---------------------------------------------------
+| phpipam-www  |           | phpipam-www  |
+| phpipam-cron |           | phpipam-cron |
+| mariadb-galera (primary) | mariadb-galera (join) |
+ --------------------------------------------------
+      |                      |
+   VLAN 120 / backend network (TCP 3306, 4444, 4567, 4568)
+```
+
+All containers run under Docker Compose. Data volumes are stored on the host (`/srv/phpipam/...`) and backed up nightly.
+
+## 3. Server Inventory
+| Host         | Role(s)                    | IP (LAN)       |
+|--------------|----------------------------|----------------|
+| `ipam-a`     | phpIPAM app, Galera, HAProxy, Keepalived (MASTER) | 10.25.70.101 |
+| `ipam-b`     | phpIPAM app, Galera, HAProxy, Keepalived (BACKUP) | 10.25.70.102 |
+| Floating VIP | Client entry point         | 10.25.70.100 |
+
+## 4. Open Ports
+- 80/443 TCP – VIP → HAProxy
+- 3306 TCP – intra‑cluster (Galera replication also 4444, 4567/tcp+udp, 4568)
+- 3478 UDP – Keepalived VRRP
+- ICMP – health checks
+
+## 5. Prerequisites
+- Rocky Linux 9.5 minimal install
+- DNS entries: `phpipam.example.com` → 10.25.70.100
+- SELinux enforcing, firewalld enabled
+- Outbound proxy reachable at `proxy.corp.local:8080`
+- Time sync (chrony) enabled
+
+### Install Docker & Compose (both nodes)
+```bash
+sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+# Compose (plugin)
+sudo dnf install -y docker-compose-plugin
+```
+
+## 6. Directory Layout
+```
+/ srv/phpipam/
+   ├─ app/
+   ├─ db/
+   └─ backup/
+```
+Apply SELinux context:
+```bash
+sudo semanage fcontext -a -t container_file_t "/srv/phpipam(/.*)?"
+sudo restorecon -Rv /srv/phpipam
+```
+
+## 7. Environment File (`phpipam.env`)
+```ini
+MYSQL_ROOT_PASSWORD=ChangeMe!
+MYSQL_USER=phpipam
+MYSQL_PASSWORD=ChangeMeToo!
+MYSQL_DATABASE=phpipam
+IPAM_TRUST_X_FORWARDED=true
+PROXY_ENABLED=true
+PROXY_SERVER=proxy.corp.local
+PROXY_PORT=8080
+PROXY_USE_AUTH=false
+# optionally
+# PROXY_USER=user
+# PROXY_PASS=pass
+```
+
+## 8. Docker Compose (per node)
+```yaml
+version: "3.9"
+services:
+  db:
+    image: bitnami/mariadb-galera:11.3
+    restart: unless-stopped
+    env_file: phpipam.env
+    environment:
+      - MARIADB_GALERA_CLUSTER_ADDRESS=gcomm://10.25.70.101,10.25.70.102
+      - MARIADB_GALERA_CLUSTER_NAME=phpipam_galera
+      - MARIADB_GALERA_MARIABACKUP_PASSWORD=${MYSQL_PASSWORD}
+      - MARIADB_GALERA_CLUSTER_BOOTSTRAP=${BOOTSTRAP:-no}
+      - MARIADB_GALERA_NODE_NAME=${HOSTNAME}
+      - ALLOW_EMPTY_PASSWORD=no
+    volumes:
+      - /srv/phpipam/db:/bitnami/mariadb
+    networks:
+      - backend
+    ports:
+      - "3306:3306"
+
+  phpipam:
+    image: phpipam/phpipam-www:v1.6.0
+    depends_on: [db]
+    restart: unless-stopped
+    env_file: phpipam.env
+    environment:
+      - TZ=America/Los_Angeles
+    volumes:
+      - /srv/phpipam/app:/phpipam/config
+    networks:
+      - frontend
+      - backend
+
+  cron:
+    image: phpipam/phpipam-cron:v1.6.0
+    depends_on: [db, phpipam]
+    restart: unless-stopped
+    env_file: phpipam.env
+    networks:
+      - backend
+
+  haproxy:
+    image: haproxy:2.9
+    restart: unless-stopped
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - frontend
+
+  keepalived:
+    image: osixia/keepalived:2.0.20
+    network_mode: host
+    privileged: true
+    environment:
+      - KEEPALIVED_VIRTUAL_IPS=10.25.70.100/24 dev eth0
+      - KEEPALIVED_INTERFACE=eth0
+      - KEEPALIVED_PRIORITY=${PRIORITY}
+      - KEEPALIVED_UNICAST_PEERS="10.25.70.101 10.25.70.102"
+      - KEEPALIVED_PASSWORD=ChangeVRRP!
+    volumes:
+      - /var/run/dbus:/var/run/dbus
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+
+networks:
+  frontend:
+  backend:
+```
+> **Bootstrap note**: On the first node only, export `BOOTSTRAP=yes` before `docker compose up -d db` to initiate the Galera primary.
+
+## 9. HAProxy Configuration (`haproxy.cfg`)
+```haproxy
+global
+  log stdout  format raw  local0
+defaults
+  log     global
+  mode    http
+  option  httplog
+  timeout connect  5s
+  timeout client  50s
+  timeout server  50s
+frontend http_in
+  bind *:80
+  redirect scheme https code 301 if !{ ssl_fc }
+frontend https_in
+  bind *:443 ssl crt /etc/ssl/private/wildcard.pem
+  default_backend phpipam_pool
+backend phpipam_pool
+  balance roundrobin
+  option httpchk GET /
+  server ipam-a 10.25.70.101:80 check
+  server ipam-b 10.25.70.102:80 check
+```
+
+## 10. Firewalld Rules
+```bash
+sudo firewall-cmd --permanent --add-service=http --add-service=https
+sudo firewall-cmd --permanent --add-port={3306/tcp,4444/tcp,4567/tcp,4567/udp,4568/tcp}
+sudo firewall-cmd --permanent --add-port=3478/udp
+sudo firewall-cmd --reload
+```
+
+## 11. SELinux Booleans
+```bash
+sudo setsebool -P container_manage_cgroup on
+sudo setsebool -P nis_enabled 1
+```
+
+## 12. Initial Setup
+1. Start Galera primary on Node‑A (`BOOTSTRAP=yes`).
+2. Start all containers: `docker compose up -d`.
+3. On Node‑B, remove `BOOTSTRAP` and start containers.
+4. Browse to `https://phpipam.example.com` → follow installer.
+5. Point to VIP (3306) or local Galera node for DB.
+
+## 13. Validation
+```bash
+docker exec -it ipam-a_db_1 mysql -u root -p -e "SHOW STATUS LIKE 'wsrep_cluster_size';"
+curl -IL https://phpipam.example.com
+```
+
+## 14. Backup Strategy
+Nightly `mysqldump` via cron, stored to `/srv/phpipam/backup` and rsynced off‑site.
+
+## 15. Optional Enhancements
+- Enable phpipam-agent containers on separate hosts for subnet scanning.
+- Grafana + MySQL datasource querying phpIPAM for dashboards.
+- LDAP (Active Directory) auth via environment variables.
+- Docker secrets for passwords instead of env files.
+- Deploy Traefik instead of HAProxy for automatic LetsEncrypt.
+
+---
