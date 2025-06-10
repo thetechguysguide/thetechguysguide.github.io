@@ -1,0 +1,162 @@
+**Installation Steps**:
+1. **Update System**:
+   ```bash
+   sudo dnf update -y
+   ```
+2. **Install Docker**:
+   ```bash
+   sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+   sudo dnf install -y docker-ce docker-ce-cli containerd.io
+   sudo systemctl enable --now docker
+   ```
+3. **Install Docker Compose**:
+   ```bash
+   sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+   sudo chmod +x /usr/local/bin/docker-compose
+   ```
+4. **Verify Installations**:
+   ```bash
+   docker --version
+   docker-compose --version
+   ```
+5. **Configure Firewall for Setup**:
+   - Open port 80 for SafeLine and port 8080 temporarily for phpIPAM installation:
+     ```bash
+     sudo firewall-cmd --add-port=80/tcp --permanent
+     sudo firewall-cmd --add-port=8080/tcp --permanent
+     sudo firewall-cmd --reload
+     sudo firewall-cmd --list-all
+     ```
+
+---
+
+## 2. Set Up phpIPAM with Docker Compose
+Deploy phpIPAM, MariaDB, and cron using a custom `docker-compose.yml`.
+
+**Steps**:
+1. **Create Project Directory**:
+   ```bash
+   mkdir -p ~/phpipam-demo && cd ~/phpipam-demo
+   ```
+2. **Create `docker-compose.yml`**:
+   ```bash
+   nano docker-compose.yml
+
+services:
+  phpipam-web:
+    image: phpipam/phpipam-www:latest
+    ports:
+      - "0.0.0.0:8080:80"  # Restrict to localhost for SafeLine after Safeline installed and application setup rever to "127.0.0.1:8080:80"
+    environment:
+      - TZ=America/Los_Angeles
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PASS=your_secure_password
+      - IPAM_DATABASE_NAME=phpipam
+      - IPAM_DATABASE_USER=phpipam
+      - IPAM_TRUST_X_FORWARD=yes
+      - IPAM_DISABLE_INSTALLER=0  # Set to 1 after installation
+    restart: unless-stopped
+    depends_on:
+      - phpipam-db
+    networks:
+      - internal
+
+  phpipam-db:
+    image: mariadb:latest
+    environment:
+      - MYSQL_ROOT_PASSWORD=your_root_password
+      - MYSQL_DATABASE=phpipam
+      - MYSQL_USER=phpipam
+      - MYSQL_PASSWORD=your_secure_password
+    restart: unless-stopped
+    volumes:
+      - phpipam-db-data:/var/lib/mysql
+    networks:
+      - internal
+
+  phpipam-cron:
+    image: phpipam/phpipam-cron:latest
+    environment:
+      - TZ=America/Los_Angeles
+      - IPAM_DATABASE_HOST=phpipam-db
+      - IPAM_DATABASE_PASS=your_secure_password
+      - SCAN_INTERVAL=1h
+    restart: unless-stopped
+    depends_on:
+      - phpipam-db
+    networks:
+      - internal
+
+volumes:
+  phpipam-db-data:
+
+networks:
+  internal:
+    driver: bridge
+	
+	
+   - Copy and paste the `docker-compose.yml` provided above.
+   - Replace `your_secure_password` and `your_root_password` with strong, unique passwords (e.g., `openssl rand -base64 12`).
+3. **Start Containers**:
+   ```bash
+   docker-compose up -d
+
+4. **Initialize Database**:
+   - Access `http://192.168.1.208:8080/index.php?page=install` in a browser.
+   - Follow the phpIPAM installer:
+     - Database host: `phpipam-db`.
+     - User: `phpipam`.
+     - Password: `your_secure_password`.
+     - Database: `phpipam`.
+     - Select “Automatic database installation.”
+     - Set admin credentials.
+
+## 3. Install and Configure SafeLine WAF
+Set up SafeLine as a reverse proxy on port 80.
+
+**Steps**:
+1. **Install SafeLine Community Edition**:
+   ```bash
+   bash -c "$(curl -fsSLk https://waf.chaitin.com/release/latest/setup.sh)"
+   ```
+   - Follow prompts and note the web interface URL (e.g., `http://192.168.1.208:9443`) and credentials.
+2. **Configure Firewall for SafeLine**:
+   - Port 80 is already open (step 1.5).
+3. **Configure SafeLine via Web Interface**:
+   - Access `http://<your server ip>:9443`.
+   - Log in and add a site:
+     - **Domain**: `<your server ip>`.
+     - **Upstream Server**: `http://127.0.0.1:8080`.
+     - **Protocol**: HTTP.
+     - **Protection**: Enable default rules (SQL injection, XSS, DDoS).
+   - Save configuration.
+4. **Test Connectivity**:
+   - Visit `http://<your server ip>` to confirm phpIPAM loads via SafeLine.
+
+---
+## 4. Modify yml 
+docker-compose down
+nano docker-compose.yml
+    Update below lines 
+    ports:
+      - "127.0.0.1:8080:80"  # Restrict to localhost for SafeLine 
+
+        - IPAM_DISABLE_INSTALLER=1  # Set to 1 after installation
+save and exit
+docker-compos ip -d
+
+---
+
+## 5. Secure and Validate
+- **Test Direct Access**:
+  - Test: `curl http://<your server ip>` should fail.
+- **Test Functionality**:
+- **Test Functionality**:
+  - `http://<your server ip>` should load phpIPAM via SafeLine.
+ 
+- **Demo Attacks**:
+  - Simulate SQL injection: `http://<your server ip>/?id=1' OR '1'='1`.
+  - Simulate XSS: `http://<your server ip>/?search=<script>alert('xss')</script>` in a form.
+  - Directory Traversal: 'http://<your server ip>/?file=../../../../etc/passwd'
+  - Check SafeLine dashboard for blocks.
+
